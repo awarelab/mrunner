@@ -8,6 +8,7 @@ from path import Path
 
 from mrunner.backends.k8s import KubernetesBackend
 from mrunner.backends.slurm import SlurmBackend, SlurmNeptuneToken
+from mrunner.backends.local import LocalBackend
 from mrunner.cli.config import ConfigParser, context as context_cli
 from mrunner.experiment import generate_experiments, get_experiments_spec_handle
 from mrunner.utils.neptune import NeptuneWrapperCmd, NeptuneToken, NEPTUNE_LOCAL_VERSION
@@ -30,7 +31,7 @@ def get_default_config_path(ctx):
 @click.option('--context', default=None, help='Name of remote context to use '
                                               '(if not provided, "contexts.current" conf key will be used)')
 @click.pass_context
-def cli(ctx, debug, config, context):
+def cli(click_ctx, debug, config, context):
     """Deploy experiments on computation cluster"""
 
     log_tags_to_suppress = ['pykwalify', 'docker', 'kubernetes', 'paramiko', 'requests.packages']
@@ -39,11 +40,11 @@ def cli(ctx, debug, config, context):
         logging.getLogger(tag).setLevel(logging.ERROR)
 
     # read configuration
-    config_path = Path(config or get_default_config_path(ctx))
+    config_path = Path(config or get_default_config_path(click_ctx))
     LOGGER.debug('Using {} as mrunner config'.format(config_path))
     config = ConfigParser(config_path).load()
 
-    cmd_require_context = ctx.invoked_subcommand not in ['context']
+    cmd_require_context = click_ctx.invoked_subcommand not in ['context']
     if cmd_require_context:
         context_name = context or config.current_context or None
         if not context_name:
@@ -63,7 +64,7 @@ def cli(ctx, debug, config, context):
         except AttributeError as e:
             raise click.ClickException(e)
 
-    ctx.obj = {'config_path': config_path,
+    click_ctx.obj = {'config_path': config_path,
                'config': config,
                'context': context}
 
@@ -74,13 +75,14 @@ def cli(ctx, debug, config, context):
 @click.option('--tags', multiple=True, help='Additional tags')
 @click.option('--requirements_file', type=click.Path(), help='Path to requirements file')
 @click.option('--base_image', help='Base docker image used in experiment')
+@click.option('--offline/--no-offline', default=False, help="Neptune offline option")
 @click.argument('script')
 @click.argument('params', nargs=-1)
 @click.pass_context
-def run(ctx, neptune, spec, tags, requirements_file, base_image, script, params):
+def run(click_ctx, neptune, spec, tags, requirements_file, base_image, offline, script, params):
     """Run experiment"""
 
-    context = ctx.obj['context']
+    context = click_ctx.obj['context']
 
     # validate options and arguments
     requirements = requirements_file and [req.strip() for req in Path(requirements_file).open('r')] or []
@@ -110,7 +112,7 @@ def run(ctx, neptune, spec, tags, requirements_file, base_image, script, params)
 
         for neptune_path, experiment in generate_experiments(script, neptune, context, spec=spec,
                                                              neptune_dir=neptune_dir):
-
+            neptune_yaml_path = neptune_path
             experiment.update({'base_image': base_image, 'requirements': requirements})
 
             if neptune_support:
@@ -135,7 +137,8 @@ def run(ctx, neptune, spec, tags, requirements_file, base_image, script, params)
                                                       neptune_storage=context['storage_dir'],
                                                       paths_to_dump=None,
                                                       additional_tags=additional_tags,
-                                                      neptune_profile=neptune_profile_name)
+                                                      neptune_profile=neptune_profile_name,
+                                                      offline=offline)
                 experiment.setdefault('paths_to_copy', [])
             else:
                 # TODO: implement no neptune version
@@ -143,9 +146,11 @@ def run(ctx, neptune, spec, tags, requirements_file, base_image, script, params)
                 raise click.ClickException('Not implemented yet')
 
             run_kwargs = {'experiment': experiment}
+            experiment['neptune_yaml_path'] = neptune_yaml_path
             backend = {
                 'kubernetes': KubernetesBackend,
-                'slurm': SlurmBackend
+                'slurm': SlurmBackend,
+                'local': LocalBackend
             }[experiment['backend_type']]()
             # TODO: add calling experiments in parallel
             backend.run(**run_kwargs)

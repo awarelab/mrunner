@@ -130,13 +130,16 @@ def _load_py_experiment_and_generate_neptune_yamls(script, spec, *, neptune_dir,
         neptune_path = _dump_to_neptune(cli_params, neptune_dir) if neptune_support else None
 
         # TODO: possibly part of this shall not be removed on experiments without neptune support
-        cli_params.pop('parameters', None)
+        parameters = cli_params.pop('parameters', None)
         cli_params.pop('project', None)
         cli_params.pop('description', None)
         cli_params.pop('tags', None)
         cli_params.pop('random_id', None)
 
-        yield (neptune_path, cli_params)
+        yield {'neptune_path': neptune_path,
+               'cli_params': cli_params,
+               'parameters': parameters
+               }
 
 
 def generate_experiments(script, neptune, context, *, spec='spec',
@@ -150,7 +153,8 @@ def generate_experiments(script, neptune, context, *, spec='spec',
         neptune_config = load_neptune_config(neptune)
         experiments = [(neptune, {'script': script, 'name': neptune_config['name']})]
 
-    for neptune_path, cli_kwargs_ in experiments:
+    for el in experiments:
+        neptune_path, cli_kwargs_, parameters = el['neptune_path'], el['cli_params'], el['parameters']
         cli_kwargs_['name'] = re.sub(r'[ .,_-]+', '-', cli_kwargs_['name'].lower())
         cli_kwargs_['cwd'] = Path.getcwd()
 
@@ -165,9 +169,17 @@ def generate_experiments(script, neptune, context, *, spec='spec',
 
 
 def get_experiments_spec_handle(script, spec):
-    vars = {}
-    exec(open(script).read(), vars)
-    spec_fun = vars.get(spec, None)
+    module = load_module_by_path(script)
+    spec_fun = getattr(module, spec, None)
+
     if not callable(spec_fun):
         spec_fun = None
     return spec_fun
+
+
+def load_module_by_path(script):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("module.name", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module

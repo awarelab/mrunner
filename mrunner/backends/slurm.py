@@ -3,6 +3,7 @@ import logging
 import socket
 import tarfile
 import tempfile
+from time import sleep
 
 import attr
 from fabric.api import run as fabric_run
@@ -187,12 +188,12 @@ class SlurmBackend(object):
 
     def run(self, experiment):
         assert Agent().get_keys(), "Add your private key to ssh agent using 'ssh-add' command"
-
         # configure fabric
         slurm_url = experiment.pop('slurm_url', '{}@{}'.format(PLGRID_USERNAME, PLGRID_HOST))
         env['host_string'] = slurm_url
 
         slurm_scratch_dir = Path(self._fabric_run('echo $SCRATCH'))
+        slurm_scratch_dir = '/net/archive/groups/plggrl_algo/scratch/mrunner_scratch/'
         experiment = ExperimentRunOnSlurm(slurm_scratch_dir=slurm_scratch_dir, slurm_url=slurm_url,
                                           **filter_only_attr(ExperimentRunOnSlurm, experiment))
         LOGGER.debug('Configuration: {}'.format(experiment))

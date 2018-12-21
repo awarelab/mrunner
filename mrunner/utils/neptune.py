@@ -124,7 +124,7 @@ def load_neptune_config(neptune_config_path):
 class NeptuneWrapperCmd(object):
 
     def __init__(self, cmd, experiment_config_path, neptune_storage=None, additional_tags=None, paths_to_dump=None,
-                 docker_image=None, neptune_profile=None):
+                 docker_image=None, neptune_profile=None, offline=False):
         self._cmd = cmd
         self._experiment_config_path = experiment_config_path
         self._additional_tags = additional_tags
@@ -132,6 +132,7 @@ class NeptuneWrapperCmd(object):
         self._paths_to_dump = paths_to_dump
         self._docker_image = docker_image
         self._neptune_profile = neptune_profile
+        self._offline = offline
 
     @property
     def command(self):
@@ -159,8 +160,9 @@ class NeptuneWrapperCmd(object):
                 tags_argv.extend(['--tag', tag])
             dump_argv = []
         docker_argv = ['--docker-image', self._docker_image] if self._docker_image else []
+        offline_argv = ['--offline'] if self._offline else []
 
-        cmd = base_argv + profile_argv + config_argv + storage_argv + tags_argv + dump_argv + docker_argv + cmd
+        cmd = base_argv + offline_argv + profile_argv + config_argv + storage_argv + tags_argv + dump_argv + docker_argv + cmd
         return ' '.join(cmd)
 
     @property
