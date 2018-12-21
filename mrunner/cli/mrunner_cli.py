@@ -7,6 +7,7 @@ import click
 from path import Path
 
 from mrunner.backends.k8s import KubernetesBackend
+from mrunner.backends.local import LocalBackend
 from mrunner.backends.slurm import SlurmBackend
 from mrunner.cli.config import ConfigParser, context as context_cli
 from mrunner.experiment import generate_experiments, get_experiments_spec_handle
@@ -121,7 +122,8 @@ def run(ctx, neptune, spec, tags, requirements_file, base_image, script, params)
                 cmd = NeptuneWrapperCmd(cmd=cmd, experiment_config_path=neptune_path,
                                         neptune_storage=context['storage_dir'],
                                         paths_to_dump=None,
-                                        additional_tags=additional_tags)
+                                        additional_tags=additional_tags,
+                                        offline=True)
                 experiment['cmd'] = cmd
                 experiment.setdefault('paths_to_copy', [])
                 for possible_token_path in ['~/.neptune_tokens/token', '~/.neptune/tokens/token']:
@@ -141,7 +143,8 @@ def run(ctx, neptune, spec, tags, requirements_file, base_image, script, params)
             run_kwargs = {'experiment': experiment}
             backend = {
                 'kubernetes': KubernetesBackend,
-                'slurm': SlurmBackend
+                'slurm': SlurmBackend,
+                'local': LocalBackend
             }[experiment['backend_type']]()
             # TODO: add calling experiments in parallel
             backend.run(**run_kwargs)
