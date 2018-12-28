@@ -129,7 +129,8 @@ def run(click_ctx, neptune, spec, tags, requirements_file, base_image, offline, 
 
                     remote_neptune_token = {
                         'kubernetes': NeptuneToken,
-                        'slurm': lambda: SlurmNeptuneToken(experiment)
+                        'slurm': lambda: SlurmNeptuneToken(experiment),
+                        'local': lambda: None
                     }[experiment['backend_type']]()
 
                 neptune_profile_name = remote_neptune_token.profile_name if remote_neptune_token else None
