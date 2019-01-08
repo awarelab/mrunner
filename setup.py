@@ -9,7 +9,7 @@ setup(
                       'docker', 'kubernetes>=5.0.0', 'google-cloud'],
     entry_points={
         'console_scripts': [
-            'mrunner=mrunner.cli.mrunner_cli:cli'
+            'mrunner=mrunner.cli.mrunner_cli:main'
         ],
     },
 )

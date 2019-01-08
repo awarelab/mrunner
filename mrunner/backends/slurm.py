@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 import logging
+import pprint
 import socket
 import tarfile
 import tempfile
 from time import sleep
+from termcolor import colored
 
 import attr
 from fabric.api import run as fabric_run
@@ -186,24 +188,36 @@ class SlurmNeptuneToken(NeptuneToken):
 
 class SlurmBackend(object):
 
-    def run(self, experiment):
+    def run(self, experiment, dry_run=False):
         assert Agent().get_keys(), "Add your private key to ssh agent using 'ssh-add' command"
+        pprint.pprint(experiment)
         # configure fabric
-        slurm_url = experiment.pop('slurm_url', '{}@{}'.format(PLGRID_USERNAME, PLGRID_HOST))
+
+        # TODO(maciek): fast hack!
+        plgrid_username = experiment.get('PLGRID_USERNAME', PLGRID_USERNAME)
+        plgrid_host = experiment.get('PLGRID_HOST', PLGRID_HOST)
+
+        slurm_url = experiment.pop('slurm_url', '{}@{}'.format(plgrid_username, plgrid_host))
         env['host_string'] = slurm_url
 
-        slurm_scratch_dir = Path(self._fabric_run('echo $SCRATCH'))
-        slurm_scratch_dir = '/net/archive/groups/plggrl_algo/scratch/mrunner_scratch/'
+
+        slurm_scratch_dir = experiment.get('slurm_scratch_dir',
+                                           Path(self._fabric_run('echo $SCRATCH')))
+
+
         experiment = ExperimentRunOnSlurm(slurm_scratch_dir=slurm_scratch_dir, slurm_url=slurm_url,
                                           **filter_only_attr(ExperimentRunOnSlurm, experiment))
         LOGGER.debug('Configuration: {}'.format(experiment))
 
-        self.ensure_directories(experiment)
-        self.deploy_neptune_token(experiment=experiment)
-        script_path = self.deploy_code(experiment)
-        SCmd = {'sbatch': SBatchWrapperCmd, 'srun': SRunWrapperCmd}[experiment.cmd_type]
-        cmd = SCmd(experiment=experiment, script_path=script_path)
-        self._fabric_run(cmd.command)
+        if not dry_run:
+            self.ensure_directories(experiment)
+            self.deploy_neptune_token(experiment=experiment)
+            script_path = self.deploy_code(experiment)
+            SCmd = {'sbatch': SBatchWrapperCmd, 'srun': SRunWrapperCmd}[experiment.cmd_type]
+            cmd = SCmd(experiment=experiment, script_path=script_path)
+            self._fabric_run(cmd.command)
+        else:
+            print(colored(30 * '=' + ' dry_run = True, not executing!!! ' + 30 * '=', 'yellow', attrs=['bold']))
 
     def ensure_directories(self, experiment):
         self._ensure_dir(experiment.experiment_scratch_dir)

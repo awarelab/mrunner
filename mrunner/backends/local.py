@@ -1,4 +1,5 @@
 import os
+import pprint
 import random
 import string
 import subprocess
@@ -13,7 +14,9 @@ class LocalBackend(object):
     def __int__(self):
         pass
 
-    def run(self, experiment):
+    def run(self, experiment, dry_run=False):
+        print('LocalBackend.run')
+        pprint.pprint(experiment)
 
         def generate_exp_dir_path(experiment):
             random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
@@ -34,8 +37,11 @@ class LocalBackend(object):
         env.update(env_update)
         env.update(experiment['env'])
 
-        print(colored(30 * '=' + ' Executing!!! ' + 30 * '=', 'green', attrs=['bold']))
-        subprocess.call(experiment['cmd'].command, shell=True, env=env)
+        if dry_run:
+            print(colored(30 * '=' + ' dry_run = True, not executing!!! ' + 30 * '=', 'yellow', attrs=['bold']))
+        else:
+            print(colored(30 * '=' + ' Executing!!! ' + 30 * '=', 'green', attrs=['bold']))
+            subprocess.call(experiment['cmd'].command, shell=True, env=env)
 
 
 

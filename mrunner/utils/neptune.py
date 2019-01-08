@@ -162,7 +162,9 @@ class NeptuneWrapperCmd(object):
         docker_argv = ['--docker-image', self._docker_image] if self._docker_image else []
         offline_argv = ['--offline'] if self._offline else []
 
-        cmd = base_argv + offline_argv + profile_argv + config_argv + storage_argv + tags_argv + dump_argv + docker_argv + cmd
+        exclude_argv = ['--exclude', 'deps/', '--exclude', '.git/']
+
+        cmd = base_argv + exclude_argv + offline_argv + profile_argv + config_argv + storage_argv + tags_argv + dump_argv + docker_argv + cmd
         return ' '.join(cmd)
 
     @property

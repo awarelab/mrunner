@@ -4,6 +4,7 @@ import re
 
 import attr
 from kubernetes import client, config
+from termcolor import colored
 
 from mrunner.experiment import COMMON_EXPERIMENT_MANDATORY_FIELDS, COMMON_EXPERIMENT_OPTIONAL_FIELDS
 from mrunner.utils.docker_engine import DockerEngine
@@ -186,9 +187,13 @@ class KubernetesBackend(object):
         self.batch_api = client.BatchV1Api()
         self.apps_api = client.AppsV1Api()
 
-    def run(self, experiment):
+    def run(self, experiment, dry_run=False):
         experiment = ExperimentRunOnKubernetes(**filter_only_attr(ExperimentRunOnKubernetes, experiment))
         image = DockerEngine().build_and_publish_image(experiment=experiment)
+
+        if dry_run:
+            print(colored(30 * '=' + ' dry_run = True, not executing!!! ' + 30 * '=', 'yellow', attrs=['bold']))
+            return
 
         self.configure_namespace(experiment)
         self.configure_storage_for_project(experiment)

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import logging
+import pprint
 import random
 import re
 import warnings
@@ -81,6 +82,14 @@ class NeptuneExperiment(object):
 
 
 def merge_experiment_parameters(cli_kwargs, neptune_config, context):
+    # print('merge_experiment_parameters')
+    # print('cli_kwargs')
+    # pprint.pprint(cli_kwargs)
+    # print('neptune_config')
+    # pprint.pprint(neptune_config)
+    # print('context')
+    # pprint.pprint(context)
+
     config = context.copy()
     for k, v in list(neptune_config.items()) + list(cli_kwargs.items()):
         if k not in config:

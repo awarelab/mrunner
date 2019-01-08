@@ -2,8 +2,11 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import sys
+from copy import deepcopy
 
 import click
+from termcolor import colored
 from path import Path
 
 from mrunner.backends.k8s import KubernetesBackend
@@ -65,21 +68,40 @@ def cli(click_ctx, debug, config, context):
             raise click.ClickException(e)
 
     click_ctx.obj = {'config_path': config_path,
-               'config': config,
-               'context': context}
+                     'config': config,
+                     'context': context}
+
+
+# INFO(maciek): copied from
+# https://stackoverflow.com/questions/22693513/merging-hierarchy-of-dictionaries-in-python
+def merge(a, b):
+    if isinstance(b, dict) and isinstance(a, dict):
+        a_and_b = a.keys() & b.keys()
+        every_key = a.keys() | b.keys()
+        return {k: merge(a[k], b[k]) if k in a_and_b else deepcopy(a[k] if k in a else b[k])
+                for k in every_key}
+    return deepcopy(b)
+
+
+def overwrite_using_overwrite_dict(d1, d2):
+    return merge(d1, d2)
 
 
 @cli.command()
 @click.option('--neptune', type=click.Path(), help="Path to neptune experiment config")
 @click.option('--spec', default='spec', help="Name of function providing experiment specification")
+@click.option('--cpu', default=None, help="-c in slurm")
 @click.option('--tags', multiple=True, help='Additional tags')
 @click.option('--requirements_file', type=click.Path(), help='Path to requirements file')
 @click.option('--base_image', help='Base docker image used in experiment')
 @click.option('--offline/--no-offline', default=False, help="Neptune offline option")
+@click.option('--dry-run/--no-dry-run', default=False, help="Dry run")
+@click.option('--limit', default=-1, help="")
 @click.argument('script')
 @click.argument('params', nargs=-1)
 @click.pass_context
-def run(click_ctx, neptune, spec, tags, requirements_file, base_image, offline, script, params):
+def run(click_ctx, neptune, spec, cpu, tags, requirements_file, base_image, offline, dry_run,
+        limit, script, params):
     """Run experiment"""
 
     context = click_ctx.obj['context']
@@ -109,9 +131,9 @@ def run(click_ctx, neptune, spec, tags, requirements_file, base_image, offline, 
             script_path = Path(script)
             neptune_dir = script_path.parent / 'neptune_{}'.format(script_path.stem)
             neptune_dir.makedirs_p()
-
-        for neptune_path, experiment in generate_experiments(script, neptune, context, spec=spec,
-                                                             neptune_dir=neptune_dir):
+        l = list(generate_experiments(script, neptune, context, spec=spec,
+                                                             neptune_dir=neptune_dir))[:limit]
+        for neptune_path, experiment in l:
             neptune_yaml_path = neptune_path
             experiment.update({'base_image': base_image, 'requirements': requirements})
 
@@ -146,15 +168,25 @@ def run(click_ctx, neptune, spec, tags, requirements_file, base_image, offline, 
                 # TODO: for sbatch set log path into something like os.path.join(resource_dir_path, "job_logs.txt")
                 raise click.ClickException('Not implemented yet')
 
-            run_kwargs = {'experiment': experiment}
             experiment['neptune_yaml_path'] = neptune_yaml_path
+
+            # TODO(maciek): this is a hack!
+            experiment = overwrite_using_overwrite_dict(experiment, experiment.get('overwrite_dict', {}))
+            experiment.pop('overwrite_dict')
+
+            if cpu is not None:
+                experiment['resources']['cpu'] = cpu
+
             backend = {
                 'kubernetes': KubernetesBackend,
                 'slurm': SlurmBackend,
                 'local': LocalBackend
             }[experiment['backend_type']]()
             # TODO: add calling experiments in parallel
-            backend.run(**run_kwargs)
+            backend.run(experiment=experiment, dry_run=dry_run)
+
+        print(colored(30 * '=' + (' Run {} experiments '.format(len(l))) + 30 * '=', 'green', attrs=['bold']))
+
     finally:
         if neptune_dir:
             neptune_dir.rmtree_p()
@@ -162,5 +194,26 @@ def run(click_ctx, neptune, spec, tags, requirements_file, base_image, offline, 
 
 cli.add_command(context_cli)
 
+def main():
+    argv = sys.argv
+
+    my_argv, rest = split_by_elem(argv, '--')
+    print(my_argv[1:], rest)
+
+
+    cli.main(args=my_argv[1:])
+    # cli()
+
+
+def split_by_elem(argv, el):
+    try:
+        index = argv.index(el)
+    except ValueError:
+        index = None
+    my_argv = argv[:index] if index is not None else argv
+    rest = argv[index + 1:] if index is not None else []
+    return my_argv, rest
+
+
 if __name__ == '__main__':
-    cli()
+    main()
