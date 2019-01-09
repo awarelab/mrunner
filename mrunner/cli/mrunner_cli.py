@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-
+import copy
+import json
 import logging
 import sys
+import uuid
 from copy import deepcopy
 
 import click
@@ -13,6 +15,7 @@ from mrunner.backends.k8s import KubernetesBackend
 from mrunner.backends.slurm import SlurmBackend, SlurmNeptuneToken
 from mrunner.backends.local import LocalBackend
 from mrunner.cli.config import ConfigParser, context as context_cli
+from mrunner.common import create_firestore_client
 from mrunner.experiment import generate_experiments, get_experiments_spec_handle
 from mrunner.utils.neptune import NeptuneWrapperCmd, NeptuneToken, NEPTUNE_LOCAL_VERSION
 
@@ -96,7 +99,7 @@ def overwrite_using_overwrite_dict(d1, d2):
 @click.option('--base_image', help='Base docker image used in experiment')
 @click.option('--offline/--no-offline', default=False, help="Neptune offline option")
 @click.option('--dry-run/--no-dry-run', default=False, help="Dry run")
-@click.option('--limit', default=-1, help="")
+@click.option('--limit', default=None, type=int, help="")
 @click.argument('script')
 @click.argument('params', nargs=-1)
 @click.pass_context
@@ -131,8 +134,15 @@ def run(click_ctx, neptune, spec, cpu, tags, requirements_file, base_image, offl
             script_path = Path(script)
             neptune_dir = script_path.parent / 'neptune_{}'.format(script_path.stem)
             neptune_dir.makedirs_p()
+
         l = list(generate_experiments(script, neptune, context, spec=spec,
-                                                             neptune_dir=neptune_dir))[:limit]
+                                                             neptune_dir=neptune_dir))
+        if limit is not None:
+            print(type(limit))
+            l = l[:limit]
+
+        print(colored(30 * '=' + (' Will run {} experiments '.format(len(l))) + 30 * '=', 'green', attrs=['bold']))
+
         for neptune_path, experiment in l:
             neptune_yaml_path = neptune_path
             experiment.update({'base_image': base_image, 'requirements': requirements})
@@ -177,6 +187,10 @@ def run(click_ctx, neptune, spec, cpu, tags, requirements_file, base_image, offl
             if cpu is not None:
                 experiment['resources']['cpu'] = cpu
 
+            firestore_exp_id = str(uuid.uuid1())
+            save_experiment_to_firestore(firestore_exp_id, experiment)
+            experiment['env']['FIRESTORE_EXPERIMENT_ID'] = firestore_exp_id
+
             backend = {
                 'kubernetes': KubernetesBackend,
                 'slurm': SlurmBackend,
@@ -190,6 +204,14 @@ def run(click_ctx, neptune, spec, cpu, tags, requirements_file, base_image, offl
     finally:
         if neptune_dir:
             neptune_dir.rmtree_p()
+
+
+def save_experiment_to_firestore(firestore_exp_id, experiment):
+    db = create_firestore_client()
+    doc_ref = db.collection('experiments').document(firestore_exp_id)
+    doc_ref.set({
+        'hparams': str(experiment['hparams'])
+    })
 
 
 cli.add_command(context_cli)

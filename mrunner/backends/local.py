@@ -8,6 +8,7 @@ from time import strftime
 
 from termcolor import colored
 
+from mrunner.common import create_firestore_client
 
 
 class LocalBackend(object):
@@ -17,6 +18,7 @@ class LocalBackend(object):
     def run(self, experiment, dry_run=False):
         print('LocalBackend.run')
         pprint.pprint(experiment)
+
 
         def generate_exp_dir_path(experiment):
             random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))

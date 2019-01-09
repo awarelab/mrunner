@@ -6,7 +6,7 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     install_requires=['PyYAML', 'fabric3', 'path.py', 'jinja2', 'six', 'attrs>=17.3', 'click',
-                      'docker', 'kubernetes>=5.0.0', 'google-cloud'],
+                      'docker', 'kubernetes>=5.0.0', 'google-cloud', 'google-cloud-firestore'],
     entry_points={
         'console_scripts': [
             'mrunner=mrunner.cli.mrunner_cli:main'
