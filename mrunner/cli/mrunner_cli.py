@@ -5,6 +5,7 @@ import json
 import logging
 import sys
 import uuid
+from concurrent.futures import ProcessPoolExecutor
 from copy import deepcopy
 
 import click
@@ -143,67 +144,73 @@ def run(click_ctx, neptune, spec, cpu, tags, requirements_file, base_image, offl
 
         print(colored(30 * '=' + (' Will run {} experiments '.format(len(l))) + 30 * '=', 'green', attrs=['bold']))
 
-        for neptune_path, experiment in l:
-            neptune_yaml_path = neptune_path
-            experiment.update({'base_image': base_image, 'requirements': requirements})
-
-            if neptune_support:
-                script = experiment.pop('script')
-                cmd = ' '.join([script] + list(params))
-                # tags from neptune.yaml will be extracted by neptune
-                additional_tags = context.get('tags', []) + list(tags)
-
-                remote_neptune_token = None
-                if NEPTUNE_LOCAL_VERSION.version[0] == 2:
-                    experiment['local_neptune_token'] = NeptuneToken()
-                    assert experiment['local_neptune_token'].path.expanduser().exists(), \
-                        'Login to neptune first with `neptune account login` command'
-
-                    remote_neptune_token = {
-                        'kubernetes': NeptuneToken,
-                        'slurm': lambda: SlurmNeptuneToken(experiment),
-                        'local': lambda: None
-                    }[experiment['backend_type']]()
-
-                neptune_profile_name = remote_neptune_token.profile_name if remote_neptune_token else None
-                experiment['cmd'] = NeptuneWrapperCmd(cmd=cmd, experiment_config_path=neptune_path,
-                                                      neptune_storage=context['storage_dir'],
-                                                      paths_to_dump=None,
-                                                      additional_tags=additional_tags,
-                                                      neptune_profile=neptune_profile_name,
-                                                      offline=offline)
-                experiment.setdefault('paths_to_copy', [])
-            else:
-                # TODO: implement no neptune version
-                # TODO: for sbatch set log path into something like os.path.join(resource_dir_path, "job_logs.txt")
-                raise click.ClickException('Not implemented yet')
-
-            experiment['neptune_yaml_path'] = neptune_yaml_path
-
-            # TODO(maciek): this is a hack!
-            experiment = overwrite_using_overwrite_dict(experiment, experiment.get('overwrite_dict', {}))
-            experiment.pop('overwrite_dict')
-
-            if cpu is not None:
-                experiment['resources']['cpu'] = cpu
-
-            firestore_exp_id = str(uuid.uuid1())
-            save_experiment_to_firestore(firestore_exp_id, experiment)
-            experiment['env']['FIRESTORE_EXPERIMENT_ID'] = firestore_exp_id
-
-            backend = {
-                'kubernetes': KubernetesBackend,
-                'slurm': SlurmBackend,
-                'local': LocalBackend
-            }[experiment['backend_type']]()
-            # TODO: add calling experiments in parallel
-            backend.run(experiment=experiment, dry_run=dry_run)
+        with ProcessPoolExecutor(max_workers=6) as executor:
+            futures = []
+            for neptune_path, experiment in l:
+                future = executor.submit(doit, base_image, context, cpu, dry_run, experiment, neptune_path, neptune_support, offline, params,
+                         requirements, tags)
+            futures.append(future)
+            for future in futures:
+                print(future.result())
 
         print(colored(30 * '=' + (' Run {} experiments '.format(len(l))) + 30 * '=', 'green', attrs=['bold']))
 
     finally:
         if neptune_dir:
             neptune_dir.rmtree_p()
+
+
+def doit(base_image, context, cpu, dry_run, experiment, neptune_path, neptune_support, offline, params, requirements,
+         tags):
+    neptune_yaml_path = neptune_path
+    experiment.update({'base_image': base_image, 'requirements': requirements})
+    if neptune_support:
+        script = experiment.pop('script')
+        cmd = ' '.join([script] + list(params))
+        # tags from neptune.yaml will be extracted by neptune
+        additional_tags = context.get('tags', []) + list(tags)
+
+        remote_neptune_token = None
+        if NEPTUNE_LOCAL_VERSION.version[0] == 2:
+            experiment['local_neptune_token'] = NeptuneToken()
+            assert experiment['local_neptune_token'].path.expanduser().exists(), \
+                'Login to neptune first with `neptune account login` command'
+
+            remote_neptune_token = {
+                'kubernetes': NeptuneToken,
+                'slurm': lambda: SlurmNeptuneToken(experiment),
+                'local': lambda: None
+            }[experiment['backend_type']]()
+
+        neptune_profile_name = remote_neptune_token.profile_name if remote_neptune_token else None
+        experiment['cmd'] = NeptuneWrapperCmd(cmd=cmd, experiment_config_path=neptune_path,
+                                              neptune_storage=context['storage_dir'],
+                                              paths_to_dump=None,
+                                              additional_tags=additional_tags,
+                                              neptune_profile=neptune_profile_name,
+                                              offline=offline)
+        experiment.setdefault('paths_to_copy', [])
+    else:
+        # TODO: implement no neptune version
+        # TODO: for sbatch set log path into something like os.path.join(resource_dir_path, "job_logs.txt")
+        raise click.ClickException('Not implemented yet')
+    experiment['neptune_yaml_path'] = neptune_yaml_path
+    # TODO(maciek): this is a hack!
+    experiment = overwrite_using_overwrite_dict(experiment, experiment.get('overwrite_dict', {}))
+    experiment.pop('overwrite_dict')
+    if cpu is not None:
+        experiment['resources']['cpu'] = cpu
+    firestore_exp_id = str(uuid.uuid1())
+    save_experiment_to_firestore(firestore_exp_id, experiment)
+    experiment['env']['FIRESTORE_EXPERIMENT_ID'] = firestore_exp_id
+    backend = {
+        'kubernetes': KubernetesBackend,
+        'slurm': SlurmBackend,
+        'local': LocalBackend
+    }[experiment['backend_type']]()
+    # TODO: add calling experiments in parallel
+    backend.run(experiment=experiment, dry_run=dry_run)
+    return 'OK'
 
 
 def save_experiment_to_firestore(firestore_exp_id, experiment):
