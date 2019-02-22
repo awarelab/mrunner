@@ -7,6 +7,8 @@ from distutils.version import LooseVersion
 import six
 from path import Path
 
+from mrunner.command import Command
+
 try:
     from deepsense import version as neptune_version
 except ImportError:
@@ -121,7 +123,7 @@ def load_neptune_config(neptune_config_path):
     return neptune_config.config_dict
 
 
-class NeptuneWrapperCmd(object):
+class NeptuneWrapperCmd(Command):
 
     def __init__(self, cmd, experiment_config_path, neptune_storage=None, additional_tags=None, paths_to_dump=None,
                  docker_image=None, neptune_profile=None, offline=False):

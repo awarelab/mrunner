@@ -3,9 +3,11 @@
 import copy
 import json
 import logging
+import random
+import re
 import sys
 import uuid
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from copy import deepcopy
 
 import click
@@ -16,10 +18,12 @@ from mrunner.backends.k8s import KubernetesBackend
 from mrunner.backends.slurm import SlurmBackend, SlurmNeptuneToken
 from mrunner.backends.local import LocalBackend
 from mrunner.cli.config import ConfigParser, context as context_cli
+from mrunner.command import SimpleCommand, Command
 from mrunner.common import create_firestore_client
-from mrunner.experiment import generate_experiments, get_experiments_spec_handle
+from mrunner.experiment import generate_experiments, get_experiments_spec_fn, merge_experiment_parameters, Experiment
 from mrunner.utils.neptune import NeptuneWrapperCmd, NeptuneToken, NEPTUNE_LOCAL_VERSION
 
+USE_FIRESTORE = False
 LOGGER = logging.getLogger(__name__)
 
 
@@ -71,9 +75,9 @@ def cli(click_ctx, debug, config, context):
         except AttributeError as e:
             raise click.ClickException(e)
 
-    click_ctx.obj = {'config_path': config_path,
-                     'config': config,
-                     'context': context}
+    click_ctx.obj.update({'config_path': config_path,
+                          'config': config,
+                          'context': context})
 
 
 # INFO(maciek): copied from
@@ -100,12 +104,13 @@ def overwrite_using_overwrite_dict(d1, d2):
 @click.option('--base_image', help='Base docker image used in experiment')
 @click.option('--offline/--no-offline', default=False, help="Neptune offline option")
 @click.option('--dry-run/--no-dry-run', default=False, help="Dry run")
+@click.option('--shuffle/--no-shuffle', default=False, help="Do shuffle before limit?")
 @click.option('--limit', default=None, type=int, help="")
-@click.argument('script')
+@click.argument('script_path')
 @click.argument('params', nargs=-1)
 @click.pass_context
 def run(click_ctx, neptune, spec, cpu, tags, requirements_file, base_image, offline, dry_run,
-        limit, script, params):
+        shuffle, limit, script_path, params):
     """Run experiment"""
 
     context = click_ctx.obj['context']
@@ -116,7 +121,7 @@ def run(click_ctx, neptune, spec, cpu, tags, requirements_file, base_image, offl
         raise click.ClickException('Provide docker base image')
     if context['backend_type'] == 'kubernetes' and not requirements_file:
         raise click.ClickException('Provide requirements.txt file')
-    script_has_spec = get_experiments_spec_handle(script, spec) is not None
+    script_has_spec = get_experiments_spec_fn(script_path, spec) is not None
     neptune_support = context.get('neptune', None) or neptune
     if neptune_support and not neptune and not script_has_spec:
         raise click.ClickException('Neptune support is enabled in context '
@@ -132,37 +137,75 @@ def run(click_ctx, neptune, spec, cpu, tags, requirements_file, base_image, offl
     try:
         # prepare neptune directory in case if neptune yamls shall be generated
         if neptune_support and not neptune:
-            script_path = Path(script)
+            script_path = Path(script_path)
             neptune_dir = script_path.parent / 'neptune_{}'.format(script_path.stem)
             neptune_dir.makedirs_p()
 
-        l = list(generate_experiments(script, neptune, context, spec=spec,
-                                                             neptune_dir=neptune_dir))
+        experiments = list(generate_experiments(script_path, neptune, context, spec_fn_name=spec,
+                                      neptune_dir=neptune_dir, rest_argv=click_ctx.obj['rest_argv']))
+        if shuffle:
+            random.shuffle(experiments)
+
         if limit is not None:
             print(type(limit))
-            l = l[:limit]
+            experiments = experiments[:limit]
 
-        print(colored(30 * '=' + (' Will run {} experiments '.format(len(l))) + 30 * '=', 'green', attrs=['bold']))
+        print(colored(30 * '=' + (' Will run {} experiments '.format(len(experiments))) + 30 * '=', 'green', attrs=['bold']))
 
-        with ProcessPoolExecutor(max_workers=6) as executor:
-            futures = []
-            for neptune_path, experiment in l:
-                future = executor.submit(doit, base_image, context, cpu, dry_run, experiment, neptune_path, neptune_support, offline, params,
-                         requirements, tags)
-            futures.append(future)
-            for future in futures:
-                print(future.result())
+        # if len(l) == 1 and l[0][1]['backend_type'] == 'local':
+        #     neptune_path, experiment = l[0]
+        #     doit(base_image, context, cpu, dry_run, experiment, neptune_path, neptune_support, offline, params,
+        #                      requirements, tags)
+        # else:
 
-        print(colored(30 * '=' + (' Run {} experiments '.format(len(l))) + 30 * '=', 'green', attrs=['bold']))
+        if len(experiments) == 1:
+            experiment = experiments[0]
+            doit(base_image, context, cpu, dry_run, experiment,
+                                             neptune_support, offline, params,
+                                             requirements, tags)
+            # max_workers = 1
+            # process_pool_class = ThreadPoolExecutor
+        else:
+            max_workers = 6
+            process_pool_class = ProcessPoolExecutor
+
+            with process_pool_class(max_workers=max_workers) as executor:
+                futures = []
+                for experiment in experiments:
+                    future = executor.submit(doit, base_image, context, cpu, dry_run, experiment,
+                                             neptune_support, offline, params,
+                                             requirements, tags)
+                futures.append(future)
+                for future in futures:
+                    print(future.result())
+
+        print(colored(30 * '=' + (' Run {} experiments '.format(len(experiments))) + 30 * '=', 'green', attrs=['bold']))
 
     finally:
         if neptune_dir:
             neptune_dir.rmtree_p()
 
 
-def doit(base_image, context, cpu, dry_run, experiment, neptune_path, neptune_support, offline, params, requirements,
-         tags):
-    neptune_yaml_path = neptune_path
+def experiment_to_some_dict(experiment: Experiment, context, **cli_kwargs):
+    neptune_yaml_path, cli_kwargs_, parameters = experiment['neptune_yaml_path'], experiment['cli_params'], experiment['parameters']
+    cli_kwargs_['name'] = re.sub(r'[ .,_-]+', '-', cli_kwargs_['name'].lower())
+    cli_kwargs_['cwd'] = Path.getcwd()
+
+    # neptune_config = load_neptune_config(neptune_path) if neptune_path else {}
+    # del neptune_config['storage']
+
+    neptune_config = {}
+    cli_kwargs_.update(**cli_kwargs)
+    experiment = merge_experiment_parameters(cli_kwargs_, neptune_config, context)
+    experiment['neptune_yaml_path'] = neptune_yaml_path
+    return experiment
+
+
+def doit(base_image, context, cpu, dry_run, experiment, neptune_support, offline, params, requirements,
+         tags, **cli_kwargs):
+    experiment = experiment_to_some_dict(experiment, context, **cli_kwargs)
+
+    neptune_yaml_path = experiment['neptune_yaml_path']
     experiment.update({'base_image': base_image, 'requirements': requirements})
     if neptune_support:
         script = experiment.pop('script')
@@ -183,32 +226,59 @@ def doit(base_image, context, cpu, dry_run, experiment, neptune_path, neptune_su
             }[experiment['backend_type']]()
 
         neptune_profile_name = remote_neptune_token.profile_name if remote_neptune_token else None
-        experiment['cmd'] = NeptuneWrapperCmd(cmd=cmd, experiment_config_path=neptune_path,
+
+
+        experiment['neptune_cmd'] = NeptuneWrapperCmd(cmd=cmd, experiment_config_path=neptune_yaml_path,
                                               neptune_storage=context['storage_dir'],
                                               paths_to_dump=None,
                                               additional_tags=additional_tags,
                                               neptune_profile=neptune_profile_name,
                                               offline=offline)
+
+        # INFO(maciek): this is a hack for setting this up with MPI,
+
+        experiment['neptune_cmd_offline'] = NeptuneWrapperCmd(cmd=cmd, experiment_config_path=neptune_yaml_path,
+                                              neptune_storage=context['storage_dir'],
+                                              paths_to_dump=None,
+                                              additional_tags=additional_tags,
+                                              neptune_profile=neptune_profile_name,
+                                              offline=True)
+        experiment['env']['NEPTUNE_CMD'] = experiment['neptune_cmd'].command
+        experiment['env']['NEPTUNE_CMD_OFFLINE'] = experiment['neptune_cmd_offline'].command
+        experiment['env']['NEPTUNE_YAML_PATH'] = experiment['neptune_yaml_path']
+
+        if experiment.get('entrypoint_path', None) is not None:
+            experiment['cmd'] = SimpleCommand(cmd=experiment['entrypoint_path'])
+        else:
+            experiment['cmd'] = experiment['neptune_cmd']
+
+
         experiment.setdefault('paths_to_copy', [])
     else:
         # TODO: implement no neptune version
         # TODO: for sbatch set log path into something like os.path.join(resource_dir_path, "job_logs.txt")
         raise click.ClickException('Not implemented yet')
+
     experiment['neptune_yaml_path'] = neptune_yaml_path
     # TODO(maciek): this is a hack!
     experiment = overwrite_using_overwrite_dict(experiment, experiment.get('overwrite_dict', {}))
     experiment.pop('overwrite_dict')
     if cpu is not None:
         experiment['resources']['cpu'] = cpu
-    firestore_exp_id = str(uuid.uuid1())
-    save_experiment_to_firestore(firestore_exp_id, experiment)
-    experiment['env']['FIRESTORE_EXPERIMENT_ID'] = firestore_exp_id
+
+
+    if USE_FIRESTORE:
+        firestore_exp_id = str(uuid.uuid1())
+        save_experiment_to_firestore(firestore_exp_id, experiment)
+        experiment['env']['FIRESTORE_EXPERIMENT_ID'] = firestore_exp_id
+
+    experiment['env'].update(experiment.get('env_update', {})) # This is bad!
+
     backend = {
         'kubernetes': KubernetesBackend,
         'slurm': SlurmBackend,
         'local': LocalBackend
     }[experiment['backend_type']]()
-    # TODO: add calling experiments in parallel
     backend.run(experiment=experiment, dry_run=dry_run)
     return 'OK'
 
@@ -223,15 +293,11 @@ def save_experiment_to_firestore(firestore_exp_id, experiment):
 
 cli.add_command(context_cli)
 
+
 def main():
     argv = sys.argv
-
-    my_argv, rest = split_by_elem(argv, '--')
-    print(my_argv[1:], rest)
-
-
-    cli.main(args=my_argv[1:])
-    # cli()
+    my_argv, rest_argv = split_by_elem(argv, '--')
+    cli.main(args=my_argv[1:], obj={'rest_argv': rest_argv})
 
 
 def split_by_elem(argv, el):

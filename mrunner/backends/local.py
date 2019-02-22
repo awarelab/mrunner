@@ -5,33 +5,32 @@ import string
 import subprocess
 from pathlib import Path
 from time import strftime
+from typing import Dict
 
 from termcolor import colored
 
 from mrunner.common import create_firestore_client
 
+def generate_exp_dir_path(experiment):
+    random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+
+    s = '{date}_{random_id}'.format(date=strftime('%Y_%m_%d_%H_%M'),
+                                    random_id=random_id)
+    exp_dir_path = Path(experiment['storage_dir']) / experiment['storage_dir'] / s
+
+    return exp_dir_path
 
 class LocalBackend(object):
     def __int__(self):
         pass
 
-    def run(self, experiment, dry_run=False):
+    def run(self, experiment: Dict, dry_run=False):
         print('LocalBackend.run')
         pprint.pprint(experiment)
 
-
-        def generate_exp_dir_path(experiment):
-            random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
-
-            s = '{date}_{random_id}'.format(date=strftime('%Y_%m_%d_%H_%M'),
-                                            random_id=random_id)
-            exp_dir_path = Path(experiment['storage_dir']) / experiment['storage_dir'] / s
-
-            return exp_dir_path
-
         env_update = {
             'NEPTUNE_YAML_PATH': experiment['neptune_yaml_path'],
-            'EXP_DIR_PATH': str(generate_exp_dir_path(experiment))
+            'EXP_DIR_PATH': str(generate_exp_dir_path(experiment)),
         }
 
         # import ipdb; ipdb.set_trace()
@@ -43,7 +42,12 @@ class LocalBackend(object):
             print(colored(30 * '=' + ' dry_run = True, not executing!!! ' + 30 * '=', 'yellow', attrs=['bold']))
         else:
             print(colored(30 * '=' + ' Executing!!! ' + 30 * '=', 'green', attrs=['bold']))
-            subprocess.call(experiment['cmd'].command, shell=True, env=env)
+            print(experiment['cmd'].env)
+
+            if experiment['entrypoint_path']:
+                subprocess.call(str(experiment['entrypoint_path']), shell=True, env=env)
+            else:
+                subprocess.call(experiment['cmd'].command, shell=True, env=env)
 
 
 

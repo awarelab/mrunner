@@ -33,10 +33,10 @@ COMMON_EXPERIMENT_OPTIONAL_FIELDS = [
     ('local_neptune_token', dict(default=None, type=NeptuneToken)),
 ]
 
-
 class Experiment(object):
+    '''This is returned by spec functions'''
 
-    def __init__(self, project, name, script, parameters, **kwargs):
+    def __init__(self, project, name, script, parameters, entrypoint_path=None, **kwargs):
         def _get_arg(k, sep=' '):
             list_type = ['tags', 'paths-to-copy', 'exclude', 'properties', 'python_path']
             v = kwargs.pop(k, [] if k in list_type else '')
@@ -46,6 +46,7 @@ class Experiment(object):
         self.project = project
         self.name = name[:16]
         self.parameters = parameters
+        self.entrypoint_path = entrypoint_path
 
         self.env = kwargs.pop('env', {})
         self.env['PYTHONPATH'] = ':'.join(['$PYTHONPATH', ] + _get_arg('python_path', sep=':'))
@@ -82,14 +83,6 @@ class NeptuneExperiment(object):
 
 
 def merge_experiment_parameters(cli_kwargs, neptune_config, context):
-    # print('merge_experiment_parameters')
-    # print('cli_kwargs')
-    # pprint.pprint(cli_kwargs)
-    # print('neptune_config')
-    # pprint.pprint(neptune_config)
-    # print('context')
-    # pprint.pprint(context)
-
     config = context.copy()
     for k, v in list(neptune_config.items()) + list(cli_kwargs.items()):
         if k not in config:
@@ -108,9 +101,9 @@ def merge_experiment_parameters(cli_kwargs, neptune_config, context):
     return config
 
 
-def _load_py_experiment_and_generate_neptune_yamls(script, spec, *, neptune_dir, neptune_version=None):
-    LOGGER.info('Found {} function in {}; will use it as experiments configuration generator'.format(spec, script))
+def _load_py_experiment_and_generate_neptune_yamls(experiments, neptune_dir, neptune_version=None):
     neptune_support = bool(neptune_dir)
+
     if neptune_support:
         if neptune_version and NEPTUNE_LOCAL_VERSION < neptune_version:
             # this shall match because we'll later use local neptune to parse them
@@ -120,23 +113,23 @@ def _load_py_experiment_and_generate_neptune_yamls(script, spec, *, neptune_dir,
         NeptuneConfigFile = {'1': NeptuneConfigFileV1, '2': NeptuneConfigFileV2}[str(NEPTUNE_LOCAL_VERSION.version[0])]
 
     def _dump_to_neptune(cli_params, neptune_dir):
-        neptune_path = None
-        while not neptune_path or neptune_path.exists():
-            neptune_path = neptune_dir / 'neptune-{}-{}.yaml'.format(get_random_name(), id_generator(4))
-        with neptune_path.open('w') as neptune_file:
+        neptune_yamlpath = None
+        while not neptune_yamlpath or neptune_yamlpath.exists():
+            neptune_yamlpath = neptune_dir / 'neptune-{}-{}.yaml'.format(get_random_name(), id_generator(4))
+        with neptune_yamlpath.open('w') as neptune_file:
             NeptuneConfigFile(**cli_params).dump(neptune_file)
-        LOGGER.debug('Generated neptune file {}: {}'.format(neptune_path, Path(neptune_path).text()))
-        return neptune_path
+        LOGGER.debug('Generated neptune file {}: {}'.format(neptune_yamlpath, Path(neptune_yamlpath).text()))
+        return neptune_yamlpath
 
-    spec_fun = get_experiments_spec_handle(script, spec)
-    for experiment in spec_fun():
+    for experiment in experiments:
         if isinstance(experiment, dict):
             experiment = NeptuneExperiment(**experiment)
         elif not hasattr(experiment, 'to_dict'):
             experiment = NeptuneExperiment(**experiment.__dict__)
+
         cli_params = experiment.to_dict()
 
-        neptune_path = _dump_to_neptune(cli_params, neptune_dir) if neptune_support else None
+        neptune_yaml_path = _dump_to_neptune(cli_params, neptune_dir) if neptune_support else None
 
         # TODO: possibly part of this shall not be removed on experiments without neptune support
         parameters = cli_params.pop('parameters', None)
@@ -145,39 +138,33 @@ def _load_py_experiment_and_generate_neptune_yamls(script, spec, *, neptune_dir,
         cli_params.pop('tags', None)
         cli_params.pop('random_id', None)
 
-        yield {'neptune_path': neptune_path,
+        yield {'neptune_yaml_path': neptune_yaml_path,
                'cli_params': cli_params,
                'parameters': parameters
                }
 
 
-def generate_experiments(script, neptune, context, *, spec='spec',
-                         neptune_dir=None, neptune_version=None, **cli_kwargs):
-    spec_fun = get_experiments_spec_handle(script, spec)
-    if spec_fun:
-        experiments = _load_py_experiment_and_generate_neptune_yamls(script, spec=spec,
+def generate_experiments(script_path, neptune, context, *, spec_fn_name='spec',
+                         neptune_dir=None, neptune_version=None, rest_argv=None):
+    spec_fn = get_experiments_spec_fn(script_path, spec_fn_name)
+    experiments = generate_experiments_from_spec_fn(neptune, neptune_dir, neptune_version, rest_argv, spec_fn)
+    return experiments
+
+
+def generate_experiments_from_spec_fn(neptune, neptune_dir, neptune_version, rest_argv, spec_fn):
+    if spec_fn:
+        experiments = spec_fn(rest_argv or [])
+        experiments = _load_py_experiment_and_generate_neptune_yamls(experiments,
                                                                      neptune_dir=neptune_dir,
                                                                      neptune_version=neptune_version)
+
     else:
         neptune_config = load_neptune_config(neptune)
-        experiments = [(neptune, {'script': script, 'name': neptune_config['name']})]
-
-    for el in experiments:
-        neptune_path, cli_kwargs_, parameters = el['neptune_path'], el['cli_params'], el['parameters']
-        cli_kwargs_['name'] = re.sub(r'[ .,_-]+', '-', cli_kwargs_['name'].lower())
-        cli_kwargs_['cwd'] = Path.getcwd()
-
-        # neptune_config = load_neptune_config(neptune_path) if neptune_path else {}
-        # del neptune_config['storage']
-
-        neptune_config = {}
-        cli_kwargs_.update(**cli_kwargs)
-        experiment = merge_experiment_parameters(cli_kwargs_, neptune_config, context)
-
-        yield neptune_path, experiment
+        experiments = [(neptune, {'script': script_path, 'name': neptune_config['name']})]
+    return experiments
 
 
-def get_experiments_spec_handle(script, spec):
+def get_experiments_spec_fn(script, spec):
     module = load_module_by_path(script)
     spec_fun = getattr(module, spec, None)
 

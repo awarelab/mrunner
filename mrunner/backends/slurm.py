@@ -61,6 +61,7 @@ EXPERIMENT_OPTIONAL_FIELDS = [
     ('log_output_path', dict(default=None)),
     ('time', dict(default=None)),
     ('ntasks', dict(default=None)),
+    ('num_nodes', dict(default=None)),
     ('modules_to_load', dict(default=attr.Factory(list), type=list)),
     ('after_module_load_cmd', dict(default='')),
     ('cmd_type', dict(default='srun')),
@@ -75,15 +76,17 @@ ExperimentRunOnSlurm = make_attr_class('ExperimentRunOnSlurm', EXPERIMENT_FIELDS
 class ExperimentScript(GeneratedTemplateFile):
     DEFAULT_SLURM_EXPERIMENT_SCRIPT_TEMPLATE = 'slurm_experiment.sh.jinja2'
 
-    def __init__(self, experiment):
+    def __init__(self, experiment, template_filename=None):
         # merge env vars
         env = experiment.cmd.env.copy() if experiment.cmd else {}
         env.update(experiment.env)
         env = {k: str(v) for k, v in env.items()}
 
+        template_filename = template_filename or self.DEFAULT_SLURM_EXPERIMENT_SCRIPT_TEMPLATE
+
         experiment = attr.evolve(experiment, env=env, experiment_scratch_dir=experiment.experiment_scratch_dir)
 
-        super(ExperimentScript, self).__init__(template_filename=self.DEFAULT_SLURM_EXPERIMENT_SCRIPT_TEMPLATE,
+        super(ExperimentScript, self).__init__(template_filename=template_filename,
                                                experiment=experiment)
         self.experiment = experiment
         self.path.chmod('a+x')
@@ -96,19 +99,23 @@ class ExperimentScript(GeneratedTemplateFile):
 
 class SlurmWrappersCmd(object):
 
-    def __init__(self, experiment, script_path):
+    def __init__(self, cmd_type, experiment, script_path):
         self._experiment = experiment
+        print(100 * 'kurwa\n')
+        print(type(self._experiment))
+        print(self._experiment)
         self._script_path = script_path
+        self._cmd_type = cmd_type
 
     @property
     def command(self):
         # see: https://slurm.schedmd.com/srun.html
         # see: https://slurm.schedmd.com/sbatch.html
 
-        if not self._cmd:
+        if not self._cmd_type:
             raise RuntimeError('Instantiate one of SlurmWrapperCmd subclasses')
 
-        cmd_items = [self._cmd]
+        cmd_items = [self._cmd_type]
 
         def _extend_cmd_items(cmd_items, option, data_key, default=None):
             value = self._getattr(data_key)
@@ -117,7 +124,7 @@ class SlurmWrappersCmd(object):
             elif default:
                 cmd_items += [option, default]
 
-        default_log_path = self._experiment.experiment_scratch_dir / 'slurm.log' if self._cmd == 'sbatch' else None
+        default_log_path = self._experiment.experiment_scratch_dir / 'slurm.log' if self._cmd_type == 'sbatch' else None
         _extend_cmd_items(cmd_items, '-A', 'account')
         _extend_cmd_items(cmd_items, '-o', 'log_output_path', default_log_path)  # output
         _extend_cmd_items(cmd_items, '-p', 'partition')
@@ -138,19 +145,19 @@ class SlurmWrappersCmd(object):
         for resource_type, resource_qty in mrunner_resources.items():
             if resource_type == 'cpu':
                 ntasks = int(self._getattr('ntasks') or 1)
-                cores_per_task = int(int(resource_qty) / ntasks)
+                num_nodes = self._getattr('num_nodes')
+                cores_per_task = resource_qty
+
                 cmd_items += ['-c', str(cores_per_task)]
 
-                if ntasks > 1:
+                if num_nodes is not None:
+                    cmd_items += ['-N', str(num_nodes)]
+                    LOGGER.debug('Running on {} nodes'.format(num_nodes))
+
+                if ntasks:
                     cmd_items += ['-n', str(ntasks)]
                     LOGGER.debug('Running {} tasks'.format(ntasks))
-                total_cpus = cores_per_task * ntasks
-                if total_cpus != int(resource_qty):
-                    LOGGER.warning('Will request {} CPU instead of {}'.format(total_cpus, int(resource_qty)))
-                if total_cpus > RECOMMENDED_CPUS_NUMBER:
-                    LOGGER.warning('Requested number of CPU is higher than recommended value {}/4'.format(
-                        total_cpus, RECOMMENDED_CPUS_NUMBER))
-                LOGGER.debug('Using {}/{} CPU cores per_task/total'.format(cores_per_task, total_cpus))
+
             elif resource_type == 'gpu':
                 cmd_items += ['--gres', 'gpu:{}'.format(resource_qty)]
                 LOGGER.debug('Using {} gpu'.format(resource_qty))
@@ -161,21 +168,6 @@ class SlurmWrappersCmd(object):
                 raise ValueError('Unsupported resource request: {}={}'.format(resource_type, resource_qty))
 
         return cmd_items
-
-
-class SBatchWrapperCmd(SlurmWrappersCmd):
-
-    def __init__(self, experiment, script_path, **kwargs):
-        super(SBatchWrapperCmd, self).__init__(experiment, script_path, **kwargs)
-        self._cmd = 'sbatch'
-
-
-class SRunWrapperCmd(SlurmWrappersCmd):
-
-    def __init__(self, experiment, script_path, **kwargs):
-        super(SRunWrapperCmd, self).__init__(experiment, script_path, **kwargs)
-        self._cmd = 'srun'
-
 
 class SlurmNeptuneToken(NeptuneToken):
 
@@ -201,10 +193,11 @@ class SlurmBackend(object):
         env['host_string'] = slurm_url
 
 
+
         slurm_scratch_dir = experiment.get('slurm_scratch_dir',
                                            Path(self._fabric_run('echo $SCRATCH')))
 
-
+        # TODO(maciek): this is too misleading
         experiment = ExperimentRunOnSlurm(slurm_scratch_dir=slurm_scratch_dir, slurm_url=slurm_url,
                                           **filter_only_attr(ExperimentRunOnSlurm, experiment))
         LOGGER.debug('Configuration: {}'.format(experiment))
@@ -213,8 +206,8 @@ class SlurmBackend(object):
             self.ensure_directories(experiment)
             self.deploy_neptune_token(experiment=experiment)
             script_path = self.deploy_code(experiment)
-            SCmd = {'sbatch': SBatchWrapperCmd, 'srun': SRunWrapperCmd}[experiment.cmd_type]
-            cmd = SCmd(experiment=experiment, script_path=script_path)
+
+            cmd = SlurmWrappersCmd(experiment.cmd_type, experiment=experiment, script_path=script_path)
             self._fabric_run(cmd.command)
         else:
             print(colored(30 * '=' + ' dry_run = True, not executing!!! ' + 30 * '=', 'yellow', attrs=['bold']))
@@ -239,7 +232,8 @@ class SlurmBackend(object):
                 self._fabric_run('tar xf {tar_filename} && rm {tar_filename}'.format(tar_filename=archive_remote_path))
 
         # create and upload experiment script
-        script = ExperimentScript(experiment)
+        script = ExperimentScript(experiment, template_filename='slurm_experiment_v2.sh.jinja2')
+
         remote_script_path = experiment.project_scratch_dir / script.script_name
         self._put(script.path, remote_script_path)
 
