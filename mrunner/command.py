@@ -17,7 +17,7 @@ class SimpleCommand(object):
 
     @property
     def command(self):
-        return self.cmd_
+        return str(self.cmd_)
 
     @property
     def env(self):
