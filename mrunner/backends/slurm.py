@@ -87,17 +87,6 @@ class ExperimentScript(GeneratedTemplateFile):
 
         experiment = attr.evolve(experiment, env=env, experiment_scratch_dir=experiment.experiment_scratch_dir)
 
-        # INFO(lukasz): this is a hack for MPI
-        default_log_path = str(experiment.experiment_scratch_dir) + '/slurm.log'
-        experiment.sbatch = { 
-                'account': experiment.account, 
-                'partition': experiment.partition, 
-                'time': experiment.time, 
-                'ntasks': experiment.ntasks, 
-                'nodes': experiment.num_nodes, 
-                'cpus-per-task': experiment.resources['cpu']}
-                #'output': default_log_path}
-
         super(ExperimentScript, self).__init__(template_filename=template_filename,
                                                experiment=experiment)
         self.experiment = experiment
@@ -133,15 +122,15 @@ class SlurmWrappersCmd(object):
             elif default:
                 cmd_items += [option, default]
 
-        default_log_path = self._experiment.experiment_scratch_dir / 'slurm.log' if self._cmd_type == 'sbatch' else None
+        #default_log_path = self._experiment.experiment_scratch_dir / 'slurm.log' if self._cmd_type == 'sbatch' else None
 
         # INFO(lukasz): now put into the stating script (for MPI)
         #_extend_cmd_items(cmd_items, '-A', 'account')
         #_extend_cmd_items(cmd_items, '-o', 'log_output_path', default_log_path)  # output
         #_extend_cmd_items(cmd_items, '-p', 'partition')
         #_extend_cmd_items(cmd_items, '-t', 'time')
+        #cmd_items += self._resources_items()  # INFO(lukasz): resources are in the script
 
-        cmd_items += self._resources_items()
         cmd_items += [self._script_path]
 
         return ' '.join(cmd_items)
