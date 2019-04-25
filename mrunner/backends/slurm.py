@@ -193,12 +193,8 @@ class SlurmBackend(object):
         slurm_url = experiment.pop('slurm_url', '{}@{}'.format(plgrid_username, plgrid_host))
         env['host_string'] = slurm_url
 
+        slurm_scratch_dir = experiment['storage_dir']
 
-
-        slurm_scratch_dir = experiment.get('slurm_scratch_dir',
-                                           Path(self._fabric_run('echo $SCRATCH')))
-
-        # TODO(maciek): this is too misleading
         experiment = ExperimentRunOnSlurm(slurm_scratch_dir=slurm_scratch_dir, slurm_url=slurm_url,
                                           **filter_only_attr(ExperimentRunOnSlurm, experiment))
         LOGGER.debug('Configuration: {}'.format(experiment))
@@ -233,8 +229,7 @@ class SlurmBackend(object):
                 self._fabric_run('tar xf {tar_filename} && rm {tar_filename}'.format(tar_filename=archive_remote_path))
 
         # create and upload experiment script
-        script = ExperimentScript(experiment, template_filename='slurm_experiment_v2.sh.jinja2')
-
+        script = ExperimentScript(experiment, template_filename='slurm_experiment_v4.sh.jinja2')
         remote_script_path = experiment.project_scratch_dir / script.script_name
         self._put(script.path, remote_script_path)
 
