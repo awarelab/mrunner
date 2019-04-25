@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-{%- for sbatch_key, sbatch_value in experiment.sbatch.items() %}
-#SBATCH --{{ env_key }}={{ env_value }}
+{%- for res_key, res_value in experiment.resources.items() %}
+#SBATCH --{{ res_key }}={{ res_value }}
 {%- endfor %}
 
 set -e

@@ -113,8 +113,6 @@ class SlurmWrappersCmd(object):
 
     def __init__(self, cmd_type, experiment, script_path):
         self._experiment = experiment
-        print(type(self._experiment))
-        print(self._experiment)
         self._script_path = script_path
         self._cmd_type = cmd_type
 
