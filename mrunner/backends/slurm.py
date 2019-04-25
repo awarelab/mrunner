@@ -196,6 +196,10 @@ class SlurmBackend(object):
 
         experiment = ExperimentRunOnSlurm(slurm_scratch_dir=slurm_scratch_dir, slurm_url=slurm_url,
                                           **filter_only_attr(ExperimentRunOnSlurm, experiment))
+
+        # INFO(lukasz): hack - adding log dir to the script
+        experiment.resources['output'] = experiment.experiment_scratch_dir / 'slurm.log'
+                
         LOGGER.debug('Configuration: {}'.format(experiment))
 
         if not dry_run:
