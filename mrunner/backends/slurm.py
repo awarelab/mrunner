@@ -102,7 +102,6 @@ class SlurmWrappersCmd(object):
 
     def __init__(self, cmd_type, experiment, script_path):
         self._experiment = experiment
-        print(100 * 'kurwa\n')
         print(type(self._experiment))
         print(self._experiment)
         self._script_path = script_path
@@ -126,10 +125,12 @@ class SlurmWrappersCmd(object):
                 cmd_items += [option, default]
 
         default_log_path = self._experiment.experiment_scratch_dir / 'slurm.log' if self._cmd_type == 'sbatch' else None
-        _extend_cmd_items(cmd_items, '-A', 'account')
-        _extend_cmd_items(cmd_items, '-o', 'log_output_path', default_log_path)  # output
-        _extend_cmd_items(cmd_items, '-p', 'partition')
-        _extend_cmd_items(cmd_items, '-t', 'time')
+
+        # INFO(lukasz): now put into the stating script (for MPI)
+        #_extend_cmd_items(cmd_items, '-A', 'account')
+        #_extend_cmd_items(cmd_items, '-o', 'log_output_path', default_log_path)  # output
+        #_extend_cmd_items(cmd_items, '-p', 'partition')
+        #_extend_cmd_items(cmd_items, '-t', 'time')
 
         cmd_items += self._resources_items()
         cmd_items += [self._script_path]
@@ -229,7 +230,7 @@ class SlurmBackend(object):
                 self._fabric_run('tar xf {tar_filename} && rm {tar_filename}'.format(tar_filename=archive_remote_path))
 
         # create and upload experiment script
-        script = ExperimentScript(experiment, template_filename='slurm_experiment_v4.sh.jinja2')
+        script = ExperimentScript(experiment, template_filename='slurm_experiment_v3.sh.jinja2')
         remote_script_path = experiment.project_scratch_dir / script.script_name
         self._put(script.path, remote_script_path)
 
