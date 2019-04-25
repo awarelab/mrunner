@@ -87,6 +87,17 @@ class ExperimentScript(GeneratedTemplateFile):
 
         experiment = attr.evolve(experiment, env=env, experiment_scratch_dir=experiment.experiment_scratch_dir)
 
+        # INFO(lukasz): this is a hack for MPI
+        default_log_path = str(experiment.experiment_scratch_dir) + '/slurm.log'
+        experiment.sbatch = { 
+                'account': experiment.account, 
+                'partition': experiment.partition, 
+                'time': experiment.time, 
+                'ntasks': experiment.ntasks, 
+                'nodes': experiment.num_nodes, 
+                'cpus-per-task': experiment.resources['cpu']}
+                #'output': default_log_path}
+
         super(ExperimentScript, self).__init__(template_filename=template_filename,
                                                experiment=experiment)
         self.experiment = experiment
