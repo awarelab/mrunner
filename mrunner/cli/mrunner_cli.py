@@ -249,13 +249,13 @@ def doit(base_image, context, cpu, dry_run, experiment, neptune_support, offline
 
         # INFO(lukasz): this is a further hack for MPI
         # TODO: add field 'sbatch' to experiment
-        default_log_path = experiment.experiment_scratch_dir / 'slurm.log'
+        default_log_path = experiment['storage_dir'] / 'slurm.log'
         experiment['sbatch']['account'] = experiment['account']
         experiment['sbatch']['partition'] = experiment['partition']
         experiment['sbatch']['time'] = experiment['time']
         experiment['sbatch']['ntasks'] = experiment['ntasks']
-        experiment['sbatch']['nodes'] = experiment['nodes']
-        experiment['sbatch']['cpus-per-task'] = experiment['cpus-per-task']
+        experiment['sbatch']['nodes'] = experiment['num_nodes']
+        experiment['sbatch']['cpus-per-task'] = experiment['cpu']
         experiment['sbatch']['output'] = experiment.get(['log_output_path'], default_log_path)  # output
 
         if experiment.get('entrypoint_path', None) is not None:
