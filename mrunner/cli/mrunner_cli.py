@@ -248,14 +248,15 @@ def doit(base_image, context, cpu, dry_run, experiment, neptune_support, offline
         experiment['env']['NEPTUNE_YAML_PATH'] = experiment['neptune_yaml_path']
 
         # INFO(lukasz): this is a hack for MPI
-        experiment['resources'] = { 
-                'account': experiment['account'],
-                'partition': experiment['partition'],
-                'time': experiment['time'], 
-                'ntasks': experiment['overwrite_dict']['ntasks'],
-                'nodes': experiment['overwrite_dict']['num_nodes'],
-                'cpus-per-task': experiment['overwrite_dict']['resources']['cpus-per-task'],
-                'mem': experiment['overwrite_dict']['resources']['mem']}
+        if experiment['backend_type'] == 'slurm':
+            experiment['resources'] = { 
+                    'account': experiment['account'],
+                    'partition': experiment['partition'],
+                    'time': experiment['time'], 
+                    'ntasks': experiment['overwrite_dict']['ntasks'],
+                    'nodes': experiment['overwrite_dict']['num_nodes'],
+                    'cpus-per-task': experiment['overwrite_dict']['resources']['cpus-per-task'],
+                    'mem': experiment['overwrite_dict']['resources']['mem']}
 
         if experiment.get('entrypoint_path', None) is not None:
             experiment['cmd'] = SimpleCommand(cmd=experiment['entrypoint_path'])
