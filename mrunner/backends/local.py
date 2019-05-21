@@ -9,7 +9,7 @@ from typing import Dict
 
 from termcolor import colored
 
-from mrunner.common import create_firestore_client
+#from mrunner.common import create_firestore_client
 
 def generate_exp_dir_path(experiment):
     random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))

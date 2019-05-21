@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 {%- for res_key, res_value in experiment.resources.items() %}
+{% if res_key != "cpu" %}
 #SBATCH --{{ res_key }}={{ res_value }}
+{% endif %}
 {%- endfor %}
 
 set -e

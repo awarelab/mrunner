@@ -19,7 +19,7 @@ from mrunner.backends.slurm import SlurmBackend, SlurmNeptuneToken
 from mrunner.backends.local import LocalBackend
 from mrunner.cli.config import ConfigParser, context as context_cli
 from mrunner.command import SimpleCommand, Command
-from mrunner.common import create_firestore_client
+#from mrunner.common import create_firestore_client
 from mrunner.experiment import generate_experiments, get_experiments_spec_fn, merge_experiment_parameters, Experiment
 from mrunner.utils.neptune import NeptuneWrapperCmd, NeptuneToken, NEPTUNE_LOCAL_VERSION
 
@@ -255,7 +255,7 @@ def doit(base_image, context, cpu, dry_run, experiment, neptune_support, offline
                     'time': experiment['time'], 
                     'ntasks': experiment['overwrite_dict']['ntasks'],
                     'nodes': experiment['overwrite_dict']['num_nodes'],
-                    'cpus-per-task': experiment['overwrite_dict']['resources']['cpus-per-task'],
+                    'cpus-per-task': experiment['overwrite_dict']['resources']['cpu'],
                     'mem': experiment['overwrite_dict']['resources']['mem']}
 
         if experiment.get('entrypoint_path', None) is not None:
@@ -277,10 +277,10 @@ def doit(base_image, context, cpu, dry_run, experiment, neptune_support, offline
         experiment['resources']['cpu'] = cpu
 
 
-    if USE_FIRESTORE:
-        firestore_exp_id = str(uuid.uuid1())
-        save_experiment_to_firestore(firestore_exp_id, experiment)
-        experiment['env']['FIRESTORE_EXPERIMENT_ID'] = firestore_exp_id
+    #if USE_FIRESTORE:
+    #    firestore_exp_id = str(uuid.uuid1())
+    #    save_experiment_to_firestore(firestore_exp_id, experiment)
+    #    experiment['env']['FIRESTORE_EXPERIMENT_ID'] = firestore_exp_id
 
     experiment['env'].update(experiment.get('env_update', {})) # This is bad!
 
@@ -293,12 +293,12 @@ def doit(base_image, context, cpu, dry_run, experiment, neptune_support, offline
     return 'OK'
 
 
-def save_experiment_to_firestore(firestore_exp_id, experiment):
-    db = create_firestore_client()
-    doc_ref = db.collection('experiments').document(firestore_exp_id)
-    doc_ref.set({
-        'hparams': str(experiment['hparams'])
-    })
+#def save_experiment_to_firestore(firestore_exp_id, experiment):
+#    db = create_firestore_client()
+#    doc_ref = db.collection('experiments').document(firestore_exp_id)
+#    doc_ref.set({
+#        'hparams': str(experiment['hparams'])
+#    })
 
 
 cli.add_command(context_cli)
